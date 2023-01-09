@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <link rel="stylesheet" href="static/mvp.css" />
+    <title>{% block title %}{% endblock title %}</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+</head>
+<body>
+    <header>
+        <nav>
+            <ul>
+                <li><a href="/">Index</a></li>
+                <li><a href="/logs">Logs</a></li>
+            </ul>
+        </nav>
+        <h1>autodl</h1>
+    </header>
+    <main>{% block content %}{% endblock content %}</main>
+</body>
+</html>

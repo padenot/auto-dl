@@ -1,0 +1,17 @@
+{% extends "base" %}
+{% block title %}Logs{% endblock title %}
+{% block content %}
+{% for log in logs %}
+
+{% if loop.index != 1 %}
+<details>
+{% else %}
+<details open>
+{% endif %}
+<summary>{{loop.index}}. {{log.id}}</summary>
+  <pre>
+  <code>{{ log.text }}</code>
+  </pre>
+</details>
+{% endfor %}
+{% endblock content %}

@@ -1,0 +1,37 @@
+{% extends "base" %}
+{% block title %}Index{% endblock title %}
+{% block content %}
+<section>
+<form action="/download" method="post">
+<header><h2>Queue downloads:</h2></header>
+  <label for="url"></label>
+  <textarea name="url" rows="20" cols="120" placeholder="https://..."></textarea>
+  
+  <label for="output_directory">Output directory:</label>
+  <select name="output_directory">
+    {% for dir in output_directories %}
+    <option value={{ dir }}>{{dir}}</option>
+    {% endfor %}
+  </select>
+  <input type="radio" name="audio_only" value="true" checked>
+  <label for="true">Audio-only</label>
+  <input type="radio" name="audio_only" value="false">
+  <label for="false">Audio+Video</label>
+  <br>
+  <input type="submit" value="Download it!">
+</form>
+</section>
+
+{% if task_list | length != 0 %}
+<section>
+  <header>
+    <h2>Tasks in flight:</h2>
+  </header>
+<ol>
+{% for task in task_list %}
+  <li>{{task.id}}</li>
+{% endfor %}
+</ol>
+</section>
+{% endif %}
+{% endblock content %}
