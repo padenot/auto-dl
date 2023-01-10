@@ -127,18 +127,26 @@ struct Log {
     text: String,
 }
 
+fn list_log_files(log_dir: &str) -> Result<Vec<DirEntry>, Box<dyn Error>> {
+    let mut paths = Vec::<DirEntry>::new();
+    let dir = fs::read_dir(log_dir)?;
+    for entry in dir {
+        if let Ok(e) = entry {
+            paths.push(e);
+        }
+    }
+    Ok(paths)
+}
+
 #[get("/logs")]
-async fn logs(config: &State<Config>) -> Template {
+async fn logs(config: &State<Config>) -> Result<Template, NotFound<String>> {
     let mut logs = Vec::<Log>::new();
-    println!("log path: {}", config.log_dir);
-    let mut paths: Vec<DirEntry> = match fs::read_dir(&config.log_dir) {
-        Ok(p) => p.map(|r| r.unwrap()).collect(),
+    info!("Log path: {}", config.log_dir);
+
+    let mut paths = match list_log_files(&config.log_dir) {
+        Ok(p) => p,
         Err(e) => {
-            logs.push(Log {
-                id: "Error".into(),
-                text: e.to_string(),
-            });
-            return Template::render("logs", context! {logs});
+            return Err(NotFound(e.to_string()));
         }
     };
 
@@ -160,7 +168,7 @@ async fn logs(config: &State<Config>) -> Template {
             logs.push(log);
         }
     }
-    Template::render("logs", context! {logs})
+    Ok(Template::render("logs", context! {logs}))
 }
 
 #[derive(FromForm, Serialize)]
