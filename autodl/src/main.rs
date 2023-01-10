@@ -46,6 +46,7 @@ struct Task {
     log_file: String,
     config: Config,
     output_directory: String,
+    subdir: String
 }
 
 impl Task {
@@ -59,6 +60,7 @@ impl Task {
             log_file,
             config: config.inner().clone(),
             output_directory: request.output_directory.into(),
+            subdir: request.subdir.into()
         }
     }
 
@@ -68,8 +70,8 @@ impl Task {
         let errors = log.try_clone()?;
 
         let output_format = format!(
-            "{}/%(autonumber+0)04d - %(title)s [%(id)s].%(ext)s",
-            task.output_directory
+            "{}/{}/%(autonumber+0)04d - %(title)s [%(id)s].%(ext)s",
+            task.output_directory, task.subdir
         );
 
         let urls = task.url.split_whitespace().collect::<Vec<&str>>();
@@ -179,6 +181,7 @@ struct DownloadRequest<'r> {
     url: &'r str,
     audio_only: bool,
     output_directory: &'r str,
+    subdir: &'r str
 }
 
 #[post("/download", data = "<download_request>")]

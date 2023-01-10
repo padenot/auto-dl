@@ -6,6 +6,7 @@
 <header><h2>Queue downloads:</h2></header>
   <label for="url"></label>
   <textarea name="url" rows="20" cols="120" placeholder="https://..."></textarea>
+  <input type=text name="subdir" placeholder="output directory, leave empty for root directory">
   
   <label for="output_directory">Output directory:</label>
   <select name="output_directory">
