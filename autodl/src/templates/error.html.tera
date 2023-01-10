@@ -1,0 +1,11 @@
+{% extends "base" %}
+{% block title %}OK{% endblock title %}
+{% block content %}
+
+<section>
+    <header>
+        <h2>Error 😭</h2>
+    </header>
+    {{message}}
+</section>
+{% endblock content %}

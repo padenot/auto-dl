@@ -8,9 +8,11 @@ use rocket::fairing::AdHoc;
 use rocket::form::Form;
 use rocket::form::Strict;
 use rocket::fs::{relative, FileServer};
+use rocket::response::status::NotFound;
 use rocket::serde::Deserialize;
 use rocket::serde::Serialize;
 use rocket::tokio::fs::File;
+use rocket::Request;
 use rocket::State;
 use rocket::{get, post, routes};
 use rocket_dyn_templates::{context, Template};
@@ -196,8 +198,25 @@ fn date_string() -> String {
 }
 
 #[get("/")]
-async fn index() -> Template {
-    Template::render("index", context! {})
+async fn index(config: &State<Config>) -> Template {
+    let task_list = TASK_LIST.lock().unwrap().clone();
+    Template::render(
+        "index",
+        context! {output_directories: &config.output_paths, task_list},
+    )
+}
+
+#[catch(500)]
+fn internal_error() -> Template {
+    Template::render("error", context! { message: "500, didn't work mate, sorry"})
+}
+
+#[catch(404)]
+fn not_found(req: &Request) -> Template {
+    Template::render(
+        "error",
+        context! { message: format!("404, couln't find {}, sorry", req.uri())},
+    )
 }
 
 #[launch]
@@ -205,6 +224,7 @@ fn rocket() -> _ {
     rocket::build()
         .mount("/", routes![index, logs, download])
         .mount("/static", FileServer::from(relative!("static")))
+        .register("/", catchers![internal_error, not_found])
         .attach(AdHoc::config::<Config>())
         .attach(Template::fairing())
 }
