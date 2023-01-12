@@ -25,6 +25,8 @@ use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::fs::DirEntry;
+use std::io::Write;
+use std::path::Path;
 use std::process::Command;
 use std::process::Stdio;
 use std::sync::Mutex;
@@ -35,7 +37,9 @@ use std::thread;
 struct Config {
     log_dir: String,
     yt_dlp_path: String,
+    rsync_path: String,
     output_directories: HashMap<String, String>,
+    delete_files_after_move: bool,
 }
 
 impl Default for Config {
@@ -43,7 +47,9 @@ impl Default for Config {
         Config {
             log_dir: "./logs/".into(),
             yt_dlp_path: "./yt-dlp".into(),
+            rsync_path: "rsync".into(),
             output_directories: HashMap::new(),
+            delete_files_after_move: true,
         }
     }
 }
@@ -58,32 +64,56 @@ struct Task {
     id: String,
     url: String,
     audio_only: bool,
-    log_file: String,
+    log_file_path: String,
     config: Config,
     output_directory: String,
+    move_directory: Option<String>,
     subdir: String,
+}
+
+fn command_to_string(command: &Command) -> String {
+    let mut rv = String::new();
+    rv += &command.get_program().to_string_lossy();
+    rv += " ";
+    rv += &command
+        .get_args()
+        .map(|s| s.to_str().unwrap_or("???"))
+        .collect::<Vec<&str>>()
+        .join(" ");
+    // for_each(|s| rv += s.to_str().unwrap_or("???"); rv += " ");
+    rv
 }
 
 impl Task {
     fn new(request: &DownloadRequest, config: &State<Config>) -> Task {
         let id = date_string();
-        let log_file = id.clone() + ".log";
+        let log_file_path = format!("{}/{}.log", config.log_dir, &id);
+        let move_directory = match config.output_directories.get(request.output_directory) {
+            Some(output_dir) => Some(output_dir.clone()),
+            None => {
+                error!(
+                    "Configuration error {} not found in output directory table.",
+                    request.output_directory
+                );
+                None
+            }
+        };
         Task {
             id,
             url: request.url.into(),
             audio_only: request.audio_only,
-            log_file,
+            log_file_path,
             config: config.inner().clone(),
             output_directory: request.output_directory.into(),
+            move_directory,
             subdir: request.subdir.into(),
         }
     }
 
-    fn download_task(task: Task) -> Result<(), Box<dyn Error>> {
-        let log_name = format!("{}/{}", task.config.log_dir, task.log_file);
-        let log = std::fs::File::create(log_name).expect("failed to open log");
-        let errors = log.try_clone()?;
-
+    fn download_task(
+        task: &Task,
+        fds: (std::fs::File, std::fs::File),
+    ) -> Result<(), Box<dyn Error>> {
         let output_format = format!(
             "{}/{}/%(autonumber+0)04d - %(title)s [%(id)s].%(ext)s",
             task.output_directory, task.subdir
@@ -107,34 +137,101 @@ impl Task {
 
         argz.extend(urls);
 
-        let mut c = Command::new(task.config.yt_dlp_path);
+        let mut c = Command::new(&task.config.yt_dlp_path);
         let c2 = c.args(&argz);
 
-        info!("{:?}", c2);
+        write!(fds.0.try_clone()?, "{:?}\n", command_to_string(c2))?;
 
-        c2.stdout(Stdio::from(log))
-            .stderr(Stdio::from(errors))
+        c2.stdout(Stdio::from(fds.0))
+            .stderr(Stdio::from(fds.1))
             .spawn()?
             .wait_with_output()?;
 
         Ok(())
     }
 
+    fn move_task(task: &Task, fds: (std::fs::File, std::fs::File)) -> Result<(), Box<dyn Error>> {
+        let move_directory = match &task.move_directory {
+            Some(d) => d,
+            None => {
+                write!(
+                    fds.0.try_clone()?,
+                    "Not moving file for output directory {}",
+                    task.output_directory
+                )?;
+                return Ok(());
+            }
+        };
+
+        // berk
+        if !move_directory.contains("@") {
+            fs::create_dir_all(&move_directory)?;
+        }
+
+        let mut argz: Vec<&str> = vec!["-v", "--progress", "-r"];
+        if task.config.delete_files_after_move {
+            argz.push("--remove-source-files");
+        }
+        let move_path = Path::new(&task.output_directory).join(&task.subdir);
+        let source = match move_path.to_str() {
+            Some(s) => s.as_ref(),
+            None => {
+                return Err("Invalid destination directory when attempting to move files.".into());
+            }
+        };
+
+        argz.push(&source);
+        argz.push(&move_directory);
+
+        let mut c = Command::new(&task.config.rsync_path);
+        let c2 = c.args(&argz);
+
+        write!(fds.0.try_clone()?, "{:?}\n", command_to_string(c2))?;
+
+        c2.stdout(Stdio::from(fds.0))
+            .stderr(Stdio::from(fds.1))
+            .spawn()?
+            .wait_with_output()?;
+
+        Ok(())
+    }
+
+    fn run_thread(task: &Task) -> Result<(), Box<dyn Error>> {
+        let mut log = std::fs::File::create(&task.log_file_path)
+            .expect("failed to create log file in download task");
+
+        if let Err(e) = Task::download_task(&task, (log.try_clone()?, log.try_clone()?)) {
+            write!(log, "Download {} failure: {}", task.id, e.to_string())?;
+            error!("Task {} error", task.id);
+        } else {
+            info!("Download {} completed", task.id);
+        }
+
+        if let Err(e) = Task::move_task(&task, (log.try_clone()?, log.try_clone()?)) {
+            return Err(format!("File move {} failure: {}", task.id, e.to_string()).into());
+        } else {
+            info!("Download {} completed", task.id);
+        }
+        let mut list = TASK_LIST.lock().unwrap();
+        if let Some(index) = list.iter().position(|t| t.id == task.id) {
+            list.swap_remove(index);
+        } else {
+            warn!("Task not found?");
+        }
+
+        Ok(())
+    }
+
     fn run(&self) {
         let task_copy = self.clone();
-        let id = self.id.clone();
         info!("Starting task {}", self.id);
-        thread::spawn(move || {
-            if let Err(e) = Task::download_task(task_copy) {
-                error!("Task {} failure: {}", id, e.to_string());
-            } else {
-                info!("Task {} completed", id);
+        thread::spawn(move || match Task::run_thread(&task_copy) {
+            Ok(_) => {
+                info!("Task {} finished successfuly", task_copy.id);
             }
-            let mut list = TASK_LIST.lock().unwrap();
-            if let Some(index) = list.iter().position(|t| t.id == id) {
-                list.swap_remove(index);
+            Err(e) => {
+                error!("Task {} error: {}", task_copy.id, e.to_string());
             }
-            warn!("Task not found?");
         });
     }
 }
