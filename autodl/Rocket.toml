@@ -1,6 +1,2 @@
 [global]
 template_dir = "src/templates/"
-log_dir = "./logs/"
-yt_dlp_path = "./yt-dlp"
-output_paths = ["default", "other"]
-secret_key = "6iSq9SWztISwjqYpaw4EZnbfrjump98nWrX+xEixRrs="

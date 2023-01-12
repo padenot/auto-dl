@@ -5,6 +5,10 @@ use crate::rocket::tokio::io::AsyncReadExt;
 use chrono::{SecondsFormat, Utc};
 use lazy_static::lazy_static;
 use rocket::fairing::AdHoc;
+use rocket::figment::providers::Format;
+use rocket::figment::providers::Serialized;
+use rocket::figment::providers::Toml;
+use rocket::figment::Figment;
 use rocket::form::Form;
 use rocket::form::Strict;
 use rocket::fs::{relative, FileServer};
@@ -17,6 +21,7 @@ use rocket::State;
 use rocket::{get, post, routes};
 use rocket_dyn_templates::{context, Template};
 use std::cmp::Reverse;
+use std::collections::HashMap;
 use std::error::Error;
 use std::fs;
 use std::fs::DirEntry;
@@ -25,12 +30,22 @@ use std::process::Stdio;
 use std::sync::Mutex;
 use std::thread;
 
-#[derive(Deserialize, Serialize, Clone)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(crate = "rocket::serde")]
 struct Config {
     log_dir: String,
     yt_dlp_path: String,
-    output_paths: Vec<String>,
+    output_directories: HashMap<String, String>,
+}
+
+impl Default for Config {
+    fn default() -> Config {
+        Config {
+            log_dir: "./logs/".into(),
+            yt_dlp_path: "./yt-dlp".into(),
+            output_directories: HashMap::new(),
+        }
+    }
 }
 
 lazy_static! {
@@ -46,7 +61,7 @@ struct Task {
     log_file: String,
     config: Config,
     output_directory: String,
-    subdir: String
+    subdir: String,
 }
 
 impl Task {
@@ -60,7 +75,7 @@ impl Task {
             log_file,
             config: config.inner().clone(),
             output_directory: request.output_directory.into(),
-            subdir: request.subdir.into()
+            subdir: request.subdir.into(),
         }
     }
 
@@ -181,7 +196,7 @@ struct DownloadRequest<'r> {
     url: &'r str,
     audio_only: bool,
     output_directory: &'r str,
-    subdir: &'r str
+    subdir: &'r str,
 }
 
 #[post("/download", data = "<download_request>")]
@@ -205,7 +220,7 @@ async fn index(config: &State<Config>) -> Template {
     let task_list = TASK_LIST.lock().unwrap().clone();
     Template::render(
         "index",
-        context! {output_directories: &config.output_paths, task_list},
+        context! {output_directories: &config.output_directories.keys().collect::<Vec<&String>>(), task_list},
     )
 }
 
@@ -224,7 +239,16 @@ fn not_found(req: &Request) -> Template {
 
 #[launch]
 fn rocket() -> _ {
-    rocket::build()
+    let figment = Figment::from(rocket::Config::default())
+        .merge(Toml::file("autodl.toml").nested())
+        .join(Serialized::defaults(Config::default()));
+
+    let mut config: Config = figment.extract().unwrap_or(Config::default());
+    if config.output_directories.is_empty() {
+        config.output_directories.insert(".".into(), ".".into());
+    }
+
+    rocket::custom(figment)
         .mount("/", routes![index, logs, download])
         .mount("/static", FileServer::from(relative!("static")))
         .register("/", catchers![internal_error, not_found])
