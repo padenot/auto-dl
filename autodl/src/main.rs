@@ -2,6 +2,8 @@
 extern crate rocket;
 
 use crate::rocket::tokio::io::AsyncReadExt;
+use anyhow::Context;
+use anyhow::Result;
 use chrono::{SecondsFormat, Utc};
 use lazy_static::lazy_static;
 use rocket::fairing::AdHoc;
@@ -21,7 +23,6 @@ use rocket::State;
 use rocket::{get, post, routes};
 use rocket_dyn_templates::{context, Template};
 use std::cmp::Reverse;
-use std::error::Error;
 use std::fs;
 use std::fs::DirEntry;
 use std::io::Write;
@@ -35,7 +36,7 @@ use std::thread;
 #[serde(crate = "rocket::serde")]
 struct RsyncSpec {
     destination: String,
-    extra_args: String
+    extra_args: String,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
@@ -43,7 +44,7 @@ struct RsyncSpec {
 struct FileMoveSpec {
     source: String,
     destination_local: Option<String>,
-    destination_remote: Option<RsyncSpec>
+    destination_remote: Option<RsyncSpec>,
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
@@ -96,21 +97,24 @@ fn command_to_string(command: &Command) -> String {
         .map(|s| s.to_str().unwrap_or("???"))
         .collect::<Vec<&str>>()
         .join(" ");
-    // for_each(|s| rv += s.to_str().unwrap_or("???"); rv += " ");
     rv
 }
 
 impl Task {
-    fn new(request: &DownloadRequest, config: &State<Config>) -> Result<Task, String> {
+    fn new(request: &DownloadRequest, config: &State<Config>) -> Result<Task> {
         let id = date_string();
         let log_file_path = format!("{}/{}.log", config.log_dir, &id);
-        let file_move_spec = match config.output_directories.iter().find(|e| e.source == request.output_directory) {
-            Some(spec) => spec,
-            None => {
-                return Err(format!("Bad request -- {} not found in config", request.output_directory));
-            }
-        };
-        Ok (Task {
+        let file_move_spec = config
+            .output_directories
+            .iter()
+            .find(|e| e.source == request.output_directory)
+            .with_context(|| {
+                format!(
+                    "Bad request -- {} not found in config",
+                    request.output_directory
+                )
+            })?;
+        Ok(Task {
             id,
             url: request.url.into(),
             audio_only: request.audio_only,
@@ -122,10 +126,7 @@ impl Task {
         })
     }
 
-    fn download_task(
-        task: &Task,
-        fds: (std::fs::File, std::fs::File),
-    ) -> Result<(), Box<dyn Error>> {
+    fn download_task(task: &Task, fds: (std::fs::File, std::fs::File)) -> Result<()> {
         let output_format = format!(
             "{}/{}/%(autonumber+0)04d - %(title)s [%(id)s].%(ext)s",
             task.output_directory, task.subdir
@@ -162,7 +163,7 @@ impl Task {
         Ok(())
     }
 
-    fn move_task(task: &Task, fds: (std::fs::File, std::fs::File)) -> Result<(), Box<dyn Error>> {
+    fn move_task(task: &Task, fds: (std::fs::File, std::fs::File)) -> Result<()> {
         if let Some(local_dir) = &task.file_move_spec.destination_local {
             fs::create_dir_all(&local_dir)?;
         }
@@ -172,13 +173,9 @@ impl Task {
             argz.push("--remove-source-files");
         }
         let move_path = Path::new(&task.output_directory).join(&task.subdir);
-        let source = match move_path.to_str() {
-            Some(s) => s.as_ref(),
-            None => {
-                return Err("Invalid destination directory when attempting to move files.".into());
-            }
-        };
-
+        let source = move_path
+            .to_str()
+            .context("Invalid destination directory when attempting to move files.")?;
 
         if let Some(rsync_opts) = &task.file_move_spec.destination_remote {
             argz.push(&rsync_opts.extra_args);
@@ -202,7 +199,7 @@ impl Task {
         Ok(())
     }
 
-    fn run_thread(task: &Task) -> Result<(), Box<dyn Error>> {
+    fn run_thread(task: &Task) -> Result<()> {
         let mut log = std::fs::File::create(&task.log_file_path)
             .expect("failed to create log file in download task");
 
@@ -213,11 +210,10 @@ impl Task {
             info!("Download {} completed", task.id);
         }
 
-        if let Err(e) = Task::move_task(&task, (log.try_clone()?, log.try_clone()?)) {
-            return Err(format!("File move {} failure: {}", task.id, e.to_string()).into());
-        } else {
-            info!("Download {} completed", task.id);
-        }
+        Task::move_task(&task, (log.try_clone()?, log.try_clone()?))
+            .with_context(|| format!("Error for file move {}", task.id))?;
+
+        info!("Download {} completed", task.id);
         let mut list = TASK_LIST.lock().unwrap();
         if let Some(index) = list.iter().position(|t| t.id == task.id) {
             list.swap_remove(index);
@@ -249,7 +245,7 @@ struct Log {
     text: String,
 }
 
-fn list_log_files(log_dir: &str) -> Result<Vec<DirEntry>, Box<dyn Error>> {
+fn list_log_files(log_dir: &str) -> Result<Vec<DirEntry>> {
     let mut paths = Vec::<DirEntry>::new();
     let dir = fs::read_dir(log_dir)?;
     for entry in dir {
@@ -313,9 +309,9 @@ fn download(
             t.run();
             TASK_LIST.lock().unwrap().push(t);
             Template::render("download", context! {download_request: request})
-        },
+        }
         Err(e) => {
-            return Template::render("error", context! {message: e.to_string()} );
+            return Template::render("error", context! {message: e.to_string()});
         }
     }
 }
@@ -357,7 +353,7 @@ fn rocket() -> _ {
         config.output_directories.push(FileMoveSpec {
             destination_local: Some(".".into()),
             destination_remote: None,
-            source: ".".into()
+            source: ".".into(),
         });
     }
 
