@@ -155,7 +155,7 @@ impl Task {
         let mut c = Command::new(&task.config.yt_dlp_path);
         let c2 = c.args(&argz);
 
-        write!(fds.0.try_clone()?, "{:?}\n", command_to_string(c2))?;
+        write!(fds.0.try_clone()?, "\n{:?}\n", command_to_string(c2))?;
 
         c2.stdout(Stdio::from(fds.0))
             .stderr(Stdio::from(fds.1))
