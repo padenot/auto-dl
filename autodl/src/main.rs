@@ -208,6 +208,7 @@ impl Task {
     fn run_thread(task: &Task) -> Result<()> {
         let mut log = std::fs::File::create(&task.log_file_path)
             .expect("failed to create log file in download task");
+        std::fs::create_dir_all(&task.output_directory).expect("failed to created output dir in download task");
 
         if let Err(e) = Task::download_task(&task, (log.try_clone()?, log.try_clone()?)) {
             write!(log, "Download {} failure: {}", task.id, e.to_string())?;
