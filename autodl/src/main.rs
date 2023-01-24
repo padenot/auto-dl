@@ -166,6 +166,10 @@ impl Task {
     }
 
     fn move_task(task: &Task, fds: (std::fs::File, std::fs::File)) -> Result<()> {
+        if task.file_move_spec.destination_local.is_none() &&
+           task.file_move_spec.destination_remote.is_none() {
+            return Ok(());
+        }
         if let Some(local_dir) = &task.file_move_spec.destination_local {
             fs::create_dir_all(&local_dir)?;
         }
