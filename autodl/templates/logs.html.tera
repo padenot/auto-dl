@@ -1,6 +1,12 @@
 {% extends "base" %}
 {% block title %}Logs{% endblock title %}
+
 {% block content %}
+
+<small>
+<a onclick='fetch("/logs/all", {method: "DELETE"});'>[delete all logs]</a>
+</small>
+
 {% for log in logs %}
 
 {% if loop.index != 1 %}
@@ -8,10 +14,11 @@
 {% else %}
 <details open>
 {% endif %}
-<summary>{{loop.index}}. {{log.id}}</summary>
+<summary>{{loop.index}}. {{log.id}} <a onclick='fetch("/logs/{{log.id}}", {method: "DELETE"});'>[delete]</a></summary>
   <pre>
   <code>{{ log.text }}</code>
   </pre>
 </details>
 {% endfor %}
+
 {% endblock content %}

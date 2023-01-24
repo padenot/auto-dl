@@ -15,6 +15,7 @@ use rocket::form::Form;
 use rocket::form::Strict;
 use rocket::fs::{relative, FileServer};
 use rocket::response::status::NotFound;
+use rocket::response::Redirect;
 use rocket::serde::Deserialize;
 use rocket::serde::Serialize;
 use rocket::tokio::fs::File;
@@ -27,6 +28,7 @@ use std::fs;
 use std::fs::DirEntry;
 use std::io::Write;
 use std::path::Path;
+use std::path::PathBuf;
 use std::process::Command;
 use std::process::Stdio;
 use std::sync::Mutex;
@@ -289,6 +291,35 @@ async fn logs(config: &State<Config>) -> Result<Template, NotFound<String>> {
     Ok(Template::render("logs", context! {logs}))
 }
 
+fn remove_all_logs(log_dir: &str) -> Result<()> {
+    for file in list_log_files(log_dir)? {
+        std::fs::remove_file(file.path())?;
+    }
+    Ok(())
+}
+
+#[delete("/logs/<id>")]
+async fn delete_logs(id: String, config: &State<Config>) -> Redirect {
+    info!("DELETE /logs");
+
+    match id.as_str() {
+        "all" => {
+            if let Err(e) = remove_all_logs(&config.log_dir) {
+                error!("Error when removing log files: {}", e.to_string());
+            }
+        }
+        _ => {
+            let mut log_path = PathBuf::from(&config.log_dir);
+            log_path.push(&id);
+            if let Err(e) = std::fs::remove_file(log_path) {
+                error!("Error when removing log file: {}: {}", id, e.to_string());
+            }
+        }
+    };
+
+    Redirect::to(uri!("/logs"))
+}
+
 #[derive(FromForm, Serialize)]
 #[serde(crate = "rocket::serde")]
 struct DownloadRequest<'r> {
@@ -358,7 +389,7 @@ fn rocket() -> _ {
     }
 
     rocket::custom(figment)
-        .mount("/", routes![index, logs, download])
+        .mount("/", routes![index, logs, delete_logs, download])
         .mount("/static", FileServer::from(relative!("static")))
         .register("/", catchers![internal_error, not_found])
         .attach(AdHoc::config::<Config>())
