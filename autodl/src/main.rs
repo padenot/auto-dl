@@ -166,8 +166,9 @@ impl Task {
     }
 
     fn move_task(task: &Task, fds: (std::fs::File, std::fs::File)) -> Result<()> {
-        if task.file_move_spec.destination_local.is_none() &&
-           task.file_move_spec.destination_remote.is_none() {
+        if task.file_move_spec.destination_local.is_none()
+            && task.file_move_spec.destination_remote.is_none()
+        {
             return Ok(());
         }
         if let Some(local_dir) = &task.file_move_spec.destination_local {
@@ -208,7 +209,8 @@ impl Task {
     fn run_thread(task: &Task) -> Result<()> {
         let mut log = std::fs::File::create(&task.log_file_path)
             .expect("failed to create log file in download task");
-        std::fs::create_dir_all(&task.output_directory).expect("failed to created output dir in download task");
+        std::fs::create_dir_all(&task.output_directory)
+            .expect("failed to created output dir in download task");
 
         if let Err(e) = Task::download_task(task, (log.try_clone()?, log.try_clone()?)) {
             write!(log, "Download {} failure: {}", task.id, e)?;
@@ -344,9 +346,7 @@ fn download(
             TASK_LIST.lock().unwrap().push(t);
             Template::render("download", context! {download_request: request})
         }
-        Err(e) => {
-            Template::render("error", context! {message: e.to_string()})
-        }
+        Err(e) => Template::render("error", context! {message: e.to_string()}),
     }
 }
 
