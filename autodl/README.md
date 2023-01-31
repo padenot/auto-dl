@@ -8,6 +8,9 @@ In `autodl.toml` in the root dir:
 [global]
 port = 8181
 # ... any other rocket-rs options
+log_dir = "./logs"
+ytdlp_path = "./yt-dlp"
+delete_files_after_move = true
 
 [[global.output_directories]]
 source="default" # output directory for yt-dlp
