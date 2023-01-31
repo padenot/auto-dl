@@ -174,7 +174,7 @@ impl Task {
             fs::create_dir_all(local_dir)?;
         }
 
-        let mut argz: Vec<&str> = vec!["-v", "--progress", "-r"];
+        let mut argz: Vec<&str> = vec!["-v", "--progress", "-r", "-a"];
         if task.config.delete_files_after_move {
             argz.push("--remove-source-files");
         }
