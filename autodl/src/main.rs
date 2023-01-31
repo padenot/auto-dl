@@ -171,7 +171,7 @@ impl Task {
             return Ok(());
         }
         if let Some(local_dir) = &task.file_move_spec.destination_local {
-            fs::create_dir_all(&local_dir)?;
+            fs::create_dir_all(local_dir)?;
         }
 
         let mut argz: Vec<&str> = vec!["-v", "--progress", "-r"];
@@ -185,17 +185,17 @@ impl Task {
 
         if let Some(rsync_opts) = &task.file_move_spec.destination_remote {
             argz.push(&rsync_opts.extra_args);
-            argz.push(&source);
+            argz.push(source);
             argz.push(&rsync_opts.destination);
         } else if let Some(local_dir) = &task.file_move_spec.destination_local {
-            argz.push(&source);
-            argz.push(&local_dir);
+            argz.push(source);
+            argz.push(local_dir);
         }
 
         let mut c = Command::new(&task.config.rsync_path);
         let c2 = c.args(&argz);
 
-        write!(fds.0.try_clone()?, "{:?}\n", command_to_string(c2))?;
+        writeln!(fds.0.try_clone()?, "{:?}", command_to_string(c2))?;
 
         c2.stdout(Stdio::from(fds.0))
             .stderr(Stdio::from(fds.1))
@@ -210,14 +210,14 @@ impl Task {
             .expect("failed to create log file in download task");
         std::fs::create_dir_all(&task.output_directory).expect("failed to created output dir in download task");
 
-        if let Err(e) = Task::download_task(&task, (log.try_clone()?, log.try_clone()?)) {
-            write!(log, "Download {} failure: {}", task.id, e.to_string())?;
+        if let Err(e) = Task::download_task(task, (log.try_clone()?, log.try_clone()?)) {
+            write!(log, "Download {} failure: {}", task.id, e)?;
             error!("Task {} error", task.id);
         } else {
             info!("Download {} completed", task.id);
         }
 
-        Task::move_task(&task, (log.try_clone()?, log.try_clone()?))
+        Task::move_task(task, (log.try_clone()?, log.try_clone()?))
             .with_context(|| format!("Error for file move {}", task.id))?;
 
         info!("Download {} completed", task.id);
@@ -255,10 +255,8 @@ struct Log {
 fn list_log_files(log_dir: &str) -> Result<Vec<DirEntry>> {
     let mut paths = Vec::<DirEntry>::new();
     let dir = fs::read_dir(log_dir)?;
-    for entry in dir {
-        if let Ok(e) = entry {
-            paths.push(e);
-        }
+    for entry in dir.flatten() {
+        paths.push(entry);
     }
     Ok(paths)
 }
@@ -347,7 +345,7 @@ fn download(
             Template::render("download", context! {download_request: request})
         }
         Err(e) => {
-            return Template::render("error", context! {message: e.to_string()});
+            Template::render("error", context! {message: e.to_string()})
         }
     }
 }
@@ -384,7 +382,7 @@ fn rocket() -> _ {
         .merge(Toml::file("autodl.toml").nested())
         .join(Serialized::defaults(Config::default()));
 
-    let mut config: Config = figment.extract().unwrap_or(Config::default());
+    let mut config: Config = figment.extract().unwrap_or_default();
     if config.output_directories.is_empty() {
         config.output_directories.push(FileMoveSpec {
             destination_local: Some(".".into()),
