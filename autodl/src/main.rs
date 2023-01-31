@@ -53,7 +53,7 @@ struct FileMoveSpec {
 #[serde(crate = "rocket::serde")]
 struct Config {
     log_dir: String,
-    yt_dlp_path: String,
+    ytdlp_path: String,
     rsync_path: String,
     rsync_extra_args: String,
     output_directories: Vec<FileMoveSpec>,
@@ -64,7 +64,7 @@ impl Default for Config {
     fn default() -> Config {
         Config {
             log_dir: "./logs/".into(),
-            yt_dlp_path: "./yt-dlp".into(),
+            ytdlp_path: "./yt-dlp".into(),
             rsync_path: "rsync".into(),
             rsync_extra_args: "".into(),
             output_directories: Vec::<FileMoveSpec>::new(),
@@ -152,7 +152,7 @@ impl Task {
 
         argz.extend(urls);
 
-        let mut c = Command::new(&task.config.yt_dlp_path);
+        let mut c = Command::new(&task.config.ytdlp_path);
         let c2 = c.args(&argz);
 
         write!(fds.0.try_clone()?, "\n{:?}\n", command_to_string(c2))?;
@@ -376,6 +376,12 @@ fn not_found(req: &Request) -> Template {
     )
 }
 
+fn check_ytdlp_path_valid(ytdlp_path: &str) -> Result<std::process::Output> {
+    let mut c = Command::new(&ytdlp_path);
+    let c = c.args(vec!["--help"]);
+    c.output().with_context(|| format!("yt-dlp could't be run from path {}", ytdlp_path))
+}
+
 #[launch]
 fn rocket() -> _ {
     let figment = Figment::from(rocket::Config::default())
@@ -389,6 +395,10 @@ fn rocket() -> _ {
             destination_remote: None,
             source: ".".into(),
         });
+    }
+
+    if let Err(e) = check_ytdlp_path_valid(&config.ytdlp_path) {
+        panic!("Error while checking configuration: {}", e);
     }
 
     rocket::custom(figment)
