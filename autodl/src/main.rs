@@ -2,10 +2,12 @@
 extern crate rocket;
 
 use crate::rocket::tokio::io::AsyncReadExt;
+use anyhow::anyhow;
 use anyhow::Context;
 use anyhow::Result;
 use chrono::{SecondsFormat, Utc};
 use lazy_static::lazy_static;
+use path_clean::PathClean;
 use rocket::fairing::AdHoc;
 use rocket::figment::providers::Format;
 use rocket::figment::providers::Serialized;
@@ -116,6 +118,19 @@ impl Task {
                     request.output_directory
                 )
             })?;
+
+        // Validate output directory
+        let output_dir = std::fs::canonicalize(&file_move_spec.source)?;
+        let mut final_output_path = PathBuf::from(&output_dir);
+        final_output_path.push(&request.subdir);
+        let cleaned = final_output_path.clean();
+        if !cleaned.starts_with(&output_dir) {
+            return Err(anyhow!(
+                "Bad request -- something funny in the path {}",
+                request.subdir
+            ));
+        }
+
         Ok(Task {
             id,
             url: request.url.into(),
@@ -340,6 +355,7 @@ fn download(
     config: &State<Config>,
 ) -> Template {
     let request = download_request.into_inner().into_inner();
+
     match Task::new(&request, config) {
         Ok(t) => {
             t.run();
@@ -379,7 +395,8 @@ fn not_found(req: &Request) -> Template {
 fn check_ytdlp_path_valid(ytdlp_path: &str) -> Result<std::process::Output> {
     let mut c = Command::new(&ytdlp_path);
     let c = c.args(vec!["--help"]);
-    c.output().with_context(|| format!("yt-dlp could't be run from path {}", ytdlp_path))
+    c.output()
+        .with_context(|| format!("yt-dlp could't be run from path {}", ytdlp_path))
 }
 
 #[launch]
