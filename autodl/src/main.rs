@@ -266,15 +266,15 @@ impl Task {
                 std::fs::create_dir_all(&spec.output_directory)
                     .expect("failed to created output dir in download task");
                 if let Err(e) =
-                    Task::download_task(&spec, (log.try_clone()?, log.try_clone()?), &task.config)
+                    Task::download_task(spec, (log.try_clone()?, log.try_clone()?), &task.config)
                 {
-                    write!(log, "Download {} failure: {}", task.id, e.to_string())?;
+                    write!(log, "Download {} failure: {}", task.id, e)?;
                     error!("Task {} error", task.id);
                 } else {
                     info!("Download {} completed", task.id);
                 }
 
-                Task::move_task(&spec, (log.try_clone()?, log.try_clone()?), &task.config)
+                Task::move_task(spec, (log.try_clone()?, log.try_clone()?), &task.config)
                     .with_context(|| format!("Error for file move {}", task.id))?;
             }
             TaskData::Update => {
@@ -439,13 +439,15 @@ fn download(
             subdir: request.subdir.to_string(),
         },
     };
-    match Task::new(&taskdata, &config) {
+    match Task::new(&taskdata, config) {
         Ok(t) => {
             t.run();
             TASK_LIST.lock().unwrap().push(t);
             Template::render("download", context! {download_request: request})
         }
-        Err(e) => Template::render("error", context! {message: e.to_string()}),
+        Err(e) => {
+            Template::render("error", context! {message: e.to_string()})
+        }
     }
 }
 
