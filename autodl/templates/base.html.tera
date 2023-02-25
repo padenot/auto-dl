@@ -12,6 +12,7 @@
             <ul>
                 <li><a href="/">Index</a></li>
                 <li><a href="/logs">Logs</a></li>
+                <li><a href="/update-yt-dlp">Update yt-dlp</a></li>
             </ul>
         </nav>
         <h1>autodl</h1>

@@ -81,15 +81,28 @@ lazy_static! {
 
 #[derive(Clone, Serialize)]
 #[serde(crate = "rocket::serde")]
-struct Task {
-    id: String,
+struct DownloadSpec {
     url: String,
     audio_only: bool,
-    log_file_path: String,
-    config: Config,
     output_directory: String,
     file_move_spec: FileMoveSpec,
     subdir: String,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(crate = "rocket::serde")]
+enum TaskData {
+    Download { spec: DownloadSpec },
+    Update,
+}
+
+#[derive(Clone, Serialize)]
+#[serde(crate = "rocket::serde")]
+struct Task {
+    id: String,
+    log_file_path: String,
+    config: Config,
+    data: TaskData,
 }
 
 fn command_to_string(command: &Command) -> String {
@@ -105,45 +118,64 @@ fn command_to_string(command: &Command) -> String {
 }
 
 impl Task {
-    fn new(request: &DownloadRequest, config: &State<Config>) -> Result<Task> {
+    fn new(request: &TaskData, config: &State<Config>) -> Result<Task> {
         let id = date_string();
         let log_file_path = format!("{}/{}.log", config.log_dir, &id);
-        let file_move_spec = config
-            .output_directories
-            .iter()
-            .find(|e| e.source == request.output_directory)
-            .with_context(|| {
-                format!(
-                    "Bad request -- {} not found in config",
-                    request.output_directory
-                )
-            })?;
+        match request {
+            TaskData::Download { spec } => {
+                let file_move_spec = config
+                    .output_directories
+                    .iter()
+                    .find(|e| e.source == spec.output_directory)
+                    .with_context(|| {
+                        format!(
+                            "Bad request -- {} not found in config",
+                            spec.output_directory
+                        )
+                    })?;
 
-        // Validate output directory
-        let output_dir = std::fs::canonicalize(&file_move_spec.source)?;
-        let mut final_output_path = PathBuf::from(&output_dir);
-        final_output_path.push(request.subdir);
-        let cleaned = final_output_path.clean();
-        if !cleaned.starts_with(&output_dir) {
-            return Err(anyhow!(
-                "Bad request -- something funny in the path {}",
-                request.subdir
-            ));
+                // Validate output directory
+                let output_dir = std::fs::canonicalize(&file_move_spec.source)?;
+                let mut final_output_path = PathBuf::from(&output_dir);
+                final_output_path.push(&spec.subdir);
+                let cleaned = final_output_path.clean();
+                if !cleaned.starts_with(&output_dir) {
+                    return Err(anyhow!(
+                        "Bad request -- something funny in the path {}",
+                        spec.subdir
+                    ));
+                }
+                Ok(Task {
+                    id,
+                    log_file_path,
+                    config: config.inner().clone(),
+                    data: TaskData::Download {
+                        spec: {
+                            DownloadSpec {
+                                url: spec.url.clone(),
+                                audio_only: spec.audio_only,
+                                output_directory: spec.output_directory.clone(),
+                                file_move_spec: file_move_spec.clone(),
+                                subdir: spec.subdir.clone(),
+                            }
+                        },
+                    },
+                })
+            }
+            TaskData::Update => Ok(Task {
+                id,
+                log_file_path,
+                config: config.inner().clone(),
+                data: TaskData::Update,
+            }),
         }
-
-        Ok(Task {
-            id,
-            url: request.url.into(),
-            audio_only: request.audio_only,
-            log_file_path,
-            config: config.inner().clone(),
-            output_directory: request.output_directory.into(),
-            file_move_spec: file_move_spec.clone(),
-            subdir: request.subdir.into(),
-        })
     }
 
-    fn download_task(task: &Task, fds: (std::fs::File, std::fs::File)) -> Result<()> {
+    fn download_task(
+        task: &DownloadSpec,
+        fds: (std::fs::File, std::fs::File),
+        config: &Config,
+    ) -> Result<()> {
         let output_format = format!(
             "{}/{}/%(autonumber+0)04d - %(title)s [%(id)s].%(ext)s",
             task.output_directory, task.subdir
@@ -167,7 +199,7 @@ impl Task {
 
         argz.extend(urls);
 
-        let mut c = Command::new(&task.config.ytdlp_path);
+        let mut c = Command::new(&config.ytdlp_path);
         let c2 = c.args(&argz);
 
         write!(fds.0.try_clone()?, "\n{:?}\n", command_to_string(c2))?;
@@ -180,7 +212,11 @@ impl Task {
         Ok(())
     }
 
-    fn move_task(task: &Task, fds: (std::fs::File, std::fs::File)) -> Result<()> {
+    fn move_task(
+        task: &DownloadSpec,
+        fds: (std::fs::File, std::fs::File),
+        config: &Config,
+    ) -> Result<()> {
         if task.file_move_spec.destination_local.is_none()
             && task.file_move_spec.destination_remote.is_none()
         {
@@ -191,7 +227,7 @@ impl Task {
         }
 
         let mut argz: Vec<&str> = vec!["-v", "--progress", "-r", "-a"];
-        if task.config.delete_files_after_move {
+        if config.delete_files_after_move {
             argz.push("--remove-source-files");
         }
         let move_path = Path::new(&task.output_directory).join(&task.subdir);
@@ -208,7 +244,7 @@ impl Task {
             argz.push(local_dir);
         }
 
-        let mut c = Command::new(&task.config.rsync_path);
+        let mut c = Command::new(&config.rsync_path);
         let c2 = c.args(&argz);
 
         writeln!(fds.0.try_clone()?, "{:?}", command_to_string(c2))?;
@@ -224,18 +260,35 @@ impl Task {
     fn run_thread(task: &Task) -> Result<()> {
         let mut log = std::fs::File::create(&task.log_file_path)
             .expect("failed to create log file in download task");
-        std::fs::create_dir_all(&task.output_directory)
-            .expect("failed to created output dir in download task");
 
-        if let Err(e) = Task::download_task(task, (log.try_clone()?, log.try_clone()?)) {
-            write!(log, "Download {} failure: {}", task.id, e)?;
-            error!("Task {} error", task.id);
-        } else {
-            info!("Download {} completed", task.id);
-        }
+        match &task.data {
+            TaskData::Download { spec } => {
+                std::fs::create_dir_all(&spec.output_directory)
+                    .expect("failed to created output dir in download task");
+                if let Err(e) =
+                    Task::download_task(&spec, (log.try_clone()?, log.try_clone()?), &task.config)
+                {
+                    write!(log, "Download {} failure: {}", task.id, e.to_string())?;
+                    error!("Task {} error", task.id);
+                } else {
+                    info!("Download {} completed", task.id);
+                }
 
-        Task::move_task(task, (log.try_clone()?, log.try_clone()?))
-            .with_context(|| format!("Error for file move {}", task.id))?;
+                Task::move_task(&spec, (log.try_clone()?, log.try_clone()?), &task.config)
+                    .with_context(|| format!("Error for file move {}", task.id))?;
+            }
+            TaskData::Update => {
+                let log2 = log.try_clone()?;
+                let argz: Vec<&str> = vec!["-U"];
+                let mut c = Command::new(&task.config.ytdlp_path);
+                let c2 = c.args(&argz);
+                write!(log.try_clone()?, "\n{:?}\n", command_to_string(c2))?;
+                c2.stdout(Stdio::from(log))
+                    .stderr(Stdio::from(log2))
+                    .spawn()?
+                    .wait_with_output()?;
+            }
+        };
 
         info!("Download {} completed", task.id);
         let mut list = TASK_LIST.lock().unwrap();
@@ -340,6 +393,24 @@ async fn delete_logs(id: String, config: &State<Config>) -> Redirect {
     Redirect::to(uri!("/logs"))
 }
 
+#[get("/update-yt-dlp")]
+async fn update_yt_dlp(config: &State<Config>) -> Redirect {
+    info!("GET /update-yt-dlp");
+
+    match Task::new(&TaskData::Update, config) {
+        Ok(t) => {
+            t.run();
+            TASK_LIST.lock().unwrap().push(t);
+            Template::render("update", context! {});
+        }
+        Err(e) => {
+            Template::render("error", context! {message: e.to_string()});
+        }
+    }
+
+    Redirect::to(uri!("/logs"))
+}
+
 #[derive(FromForm, Serialize)]
 #[serde(crate = "rocket::serde")]
 struct DownloadRequest<'r> {
@@ -355,8 +426,20 @@ fn download(
     config: &State<Config>,
 ) -> Template {
     let request = download_request.into_inner().into_inner();
-
-    match Task::new(&request, config) {
+    let taskdata = TaskData::Download {
+        spec: DownloadSpec {
+            url: request.url.to_string(),
+            audio_only: request.audio_only,
+            output_directory: request.output_directory.to_string(),
+            file_move_spec: FileMoveSpec {
+                source: "()".to_string(),
+                destination_local: None,
+                destination_remote: None,
+            },
+            subdir: request.subdir.to_string(),
+        },
+    };
+    match Task::new(&taskdata, &config) {
         Ok(t) => {
             t.run();
             TASK_LIST.lock().unwrap().push(t);
@@ -419,7 +502,10 @@ fn rocket() -> _ {
     }
 
     rocket::custom(figment)
-        .mount("/", routes![index, logs, delete_logs, download])
+        .mount(
+            "/",
+            routes![index, logs, delete_logs, download, update_yt_dlp],
+        )
         .mount("/static", FileServer::from(relative!("static")))
         .register("/", catchers![internal_error, not_found])
         .attach(AdHoc::config::<Config>())

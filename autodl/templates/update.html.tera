@@ -1,0 +1,9 @@
+{% extends "base" %}
+{% block title %}OK{% endblock title %}
+{% block content %}
+
+<section>
+<header><h2>yt-dlp update</h2></header>
+in progress yo
+</section>
+{% endblock content %}
