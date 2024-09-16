@@ -15,7 +15,7 @@ use rocket::figment::providers::Toml;
 use rocket::figment::Figment;
 use rocket::form::Form;
 use rocket::form::Strict;
-use rocket::fs::{relative, FileServer};
+use rocket::fs::FileServer;
 use rocket::response::status::NotFound;
 use rocket::response::Redirect;
 use rocket::serde::Deserialize;
@@ -508,7 +508,7 @@ fn rocket() -> _ {
             "/",
             routes![index, logs, delete_logs, download, update_yt_dlp],
         )
-        .mount("/static", FileServer::from(relative!("static")))
+        .mount("/static", FileServer::from("static"))
         .register("/", catchers![internal_error, not_found])
         .attach(AdHoc::config::<Config>())
         .attach(Template::fairing())
