@@ -226,14 +226,25 @@ impl Task {
             fs::create_dir_all(local_dir)?;
         }
 
-        let mut argz: Vec<&str> = vec!["-v", "--progress", "-r", "-a"];
+        let mut argz: Vec<&str> = vec!["-v", "--progress", "-rp"];
         if config.delete_files_after_move {
             argz.push("--remove-source-files");
         }
         let move_path = Path::new(&task.output_directory).join(&task.subdir);
-        let source = move_path
-            .to_str()
-            .context("Invalid destination directory when attempting to move files.")?;
+        let p = move_path.clone();
+        let source = p.to_str().context("Invalid destination directory when attempting to move files.")?;
+
+
+        let p = move_path.clone();
+        let path_str = p.into_os_string().into_string().unwrap();
+        let mut chmod_cmd = Command::new("chmod");
+        chmod_cmd.args(["-R", "a+r", &path_str]);
+        writeln!(fds.0.try_clone()?, "{:?}", command_to_string(&chmod_cmd))?;
+
+        chmod_cmd.stdout(Stdio::from(fds.0.try_clone()?))
+            .stderr(Stdio::from(fds.1.try_clone()?))
+            .spawn()?
+            .wait_with_output()?;
 
         if let Some(rsync_opts) = &task.file_move_spec.destination_remote {
             argz.push(&rsync_opts.extra_args);
@@ -245,11 +256,11 @@ impl Task {
         }
 
         let mut c = Command::new(&config.rsync_path);
-        let c2 = c.args(&argz);
+        c.args(&argz);
 
-        writeln!(fds.0.try_clone()?, "{:?}", command_to_string(c2))?;
+        writeln!(fds.0.try_clone()?, "{:?}", command_to_string(&c))?;
 
-        c2.stdout(Stdio::from(fds.0))
+        c.stdout(Stdio::from(fds.0))
             .stderr(Stdio::from(fds.1))
             .spawn()?
             .wait_with_output()?;
