@@ -320,7 +320,7 @@ impl Task {
                 info!("Task {} finished successfuly", task_copy.id);
             }
             Err(e) => {
-                error!("Task {} error: {}", task_copy.id, e.to_string());
+                error!("Task {} error: {:?}", task_copy.id, e);
             }
         });
     }
@@ -364,10 +364,13 @@ async fn logs(config: &State<Config>) -> Result<Template, NotFound<String>> {
                     id: path.file_name().to_string_lossy().into_owned(),
                     text: buf,
                 },
-                Err(e) => Log {
-                    id: "Error".into(),
-                    text: e.to_string(),
-                },
+                Err(e) => {
+                    let msg = format!("{:?}", e);
+                    Log {
+                        id: "Error".into(),
+                        text: msg,
+                    }
+                }
             };
             logs.push(log);
         }
@@ -389,14 +392,14 @@ async fn delete_logs(id: String, config: &State<Config>) -> Redirect {
     match id.as_str() {
         "all" => {
             if let Err(e) = remove_all_logs(&config.log_dir) {
-                error!("Error when removing log files: {}", e.to_string());
+                error!("Error when removing log files: {:?}", e);
             }
         }
         _ => {
             let mut log_path = PathBuf::from(&config.log_dir);
             log_path.push(&id);
             if let Err(e) = std::fs::remove_file(log_path) {
-                error!("Error when removing log file: {}: {}", id, e.to_string());
+                error!("Error when removing log file: {}: {:?}", id, e);
             }
         }
     };
@@ -415,7 +418,8 @@ async fn update_yt_dlp(config: &State<Config>) -> Redirect {
             Template::render("update", context! {});
         }
         Err(e) => {
-            Template::render("error", context! {message: e.to_string()});
+            let msg = format!("{:?}", e);
+            Template::render("error", context! {message: msg});
         }
     }
 
@@ -457,7 +461,8 @@ fn download(
             Template::render("download", context! {download_request: request})
         }
         Err(e) => {
-            Template::render("error", context! {message: e.to_string()})
+            let msg = format!("{:?}", e);
+            Template::render("error", context! {message: msg})
         }
     }
 }

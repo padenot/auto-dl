@@ -6,6 +6,11 @@
     <header>
         <h2>Error 😭</h2>
     </header>
+    <pre>
+    <code>
     {{message}}
+    </code>
+    </pre>
 </section>
 {% endblock content %}
+
